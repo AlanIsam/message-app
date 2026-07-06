@@ -26,6 +26,12 @@ create table public.conversations (
   created_at timestamptz default now()
 );
 
+-- Added after both tables exist (forward reference) — lets the notify Edge
+-- Function skip pushing to someone who already has this exact conversation
+-- open and foregrounded. See migrations/008_active_conversation_tracking.sql.
+alter table public.profiles
+  add column if not exists active_conversation_id uuid references public.conversations(id) on delete set null;
+
 create table public.conversation_members (
   conversation_id uuid references public.conversations(id) on delete cascade,
   user_id uuid references public.profiles(id) on delete cascade,

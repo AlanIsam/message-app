@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { View, FlatList, Text, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native'
+import { View, FlatList, Text, StyleSheet, KeyboardAvoidingView, Platform, AppState } from 'react-native'
 import { useLocalSearchParams, useNavigation } from 'expo-router'
 import { useIsFocused } from '@react-navigation/native'
 import { supabase } from '../../../lib/supabase'
@@ -121,6 +121,35 @@ export default function ChatScreen() {
     if (!id || !user || !isFocused || openedForId.current !== id) return
     supabase.rpc('mark_conversation_read', { convo_id: id })
   }, [id, user?.id, messages.length, isFocused])
+
+  // Lets the notify Edge Function skip pushing a notification for a
+  // conversation the recipient already has open and foregrounded — they're
+  // already seeing the message live via realtime, so a push there (sound,
+  // vibration, banner) is just noise rather than useful. `isFocused` alone
+  // isn't enough: expo-router keeps this screen "focused" in the
+  // navigation sense even while the whole app is backgrounded, so combine
+  // it with AppState to only count as "actively viewing" when both are true.
+  useEffect(() => {
+    if (!id || !user) return
+
+    function setActiveConversation(active: boolean) {
+      supabase
+        .from('profiles')
+        .update({ active_conversation_id: active ? id : null })
+        .eq('id', user!.id)
+    }
+
+    setActiveConversation(isFocused && AppState.currentState === 'active')
+
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      setActiveConversation(isFocused && state === 'active')
+    })
+
+    return () => {
+      appStateSub.remove()
+      setActiveConversation(false)
+    }
+  }, [id, user?.id, isFocused])
 
   async function handleSend(text: string) {
     await sendMessage(text)

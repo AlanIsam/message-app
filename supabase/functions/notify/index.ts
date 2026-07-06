@@ -51,7 +51,22 @@ Deno.serve(async (req) => {
     .eq('conversation_id', record.conversation_id)
     .neq('user_id', record.sender_id)
 
-  const recipientIds = (members ?? []).map((m) => m.user_id)
+  const allRecipientIds = (members ?? []).map((m) => m.user_id)
+  if (allRecipientIds.length === 0) return new Response('ok')
+
+  // Skip anyone who already has this exact conversation open and
+  // foregrounded — see app/(app)/chat/[id].tsx for how active_conversation_id
+  // gets set/cleared. They're already seeing the message live via realtime,
+  // so a push here would just be noise (sound/vibration for a chat they're
+  // actively looking at).
+  const { data: activeViewers } = await admin
+    .from('profiles')
+    .select('id')
+    .in('id', allRecipientIds)
+    .eq('active_conversation_id', record.conversation_id)
+
+  const activeViewerIds = new Set((activeViewers ?? []).map((p) => p.id))
+  const recipientIds = allRecipientIds.filter((id) => !activeViewerIds.has(id))
   if (recipientIds.length === 0) return new Response('ok')
 
   const { data: devices } = await admin
