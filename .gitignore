@@ -1,0 +1,16 @@
+node_modules/
+.expo/
+dist/
+web-build/
+.env
+.env.*
+!.env.example
+google-services.json
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+npm-debug.*
+*.log
+.DS_Store

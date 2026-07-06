@@ -1,0 +1,5 @@
+[functions.notify]
+# The Database Webhook calls this function with our own `x-webhook-secret`
+# header, not a Supabase-issued JWT. With JWT verification on (the default),
+# the gateway rejects the request before it ever reaches our handler.
+verify_jwt = false
