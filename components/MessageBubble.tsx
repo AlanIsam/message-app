@@ -19,7 +19,7 @@ export function MessageBubble({ content, senderUsername, createdAt, isOwn, showS
         {/* Rendered as plain RN <Text> — no HTML parsing, no dangerouslySetInnerHTML
             (security-hardening #9: avoids stored XSS on the web build). */}
         <Text style={isOwn ? styles.contentOwn : styles.content}>{content}</Text>
-        <Text style={styles.time}>{time}</Text>
+        <Text style={isOwn ? styles.timeOwn : styles.time}>{time}</Text>
       </View>
     </View>
   )
@@ -66,6 +66,15 @@ const styles = StyleSheet.create({
   },
   time: {
     color: colors.textMuted,
+    fontSize: 10,
+    marginTop: 4,
+    alignSelf: 'flex-end',
+  },
+  timeOwn: {
+    // textMuted (grayish) has poor contrast against the green accent
+    // bubble — softened white keeps the same "muted caption" feel content
+    // gets from contentOwn's full white, without being as loud.
+    color: 'rgba(255,255,255,0.75)',
     fontSize: 10,
     marginTop: 4,
     alignSelf: 'flex-end',
