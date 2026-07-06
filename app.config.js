@@ -4,7 +4,10 @@
 // project archive — see documentation.md for the full story.
 module.exports = {
   expo: {
-    name: 'chat-app',
+    // Display name only — slug/scheme/package id are already tied to the
+    // linked EAS project, Firebase Android app, and build credentials, so
+    // they're deliberately left as-is (see documentation.md).
+    name: 'Randau',
     slug: 'message-app',
     scheme: 'chatapp',
     version: '1.0.0',
@@ -12,14 +15,17 @@ module.exports = {
     userInterfaceStyle: 'dark',
     backgroundColor: '#1e2321',
     assetBundlePatterns: ['**/*'],
+    icon: './assets/icon.png',
     web: {
       bundler: 'metro',
+      favicon: './assets/icon.png',
     },
     android: {
       package: 'com.chatapp.mobile',
       googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? './google-services.json',
       adaptiveIcon: {
-        backgroundColor: '#1e2321',
+        foregroundImage: './assets/adaptive-icon.png',
+        backgroundColor: '#16a34a',
       },
     },
     plugins: [
