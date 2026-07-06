@@ -14,27 +14,47 @@ type Props = {
 export function CreateGroupModal({ visible, onClose, onCreated }: Props) {
   const { user } = useAuth()
   const [groupName, setGroupName] = useState('')
-  const [allUsers, setAllUsers] = useState<Profile[]>([])
-  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set())
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<Profile[]>([])
+  const [searching, setSearching] = useState(false)
+  const [selectedUsers, setSelectedUsers] = useState<Profile[]>([])
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Search-as-you-type instead of listing every user in the system —
+  // debounced so it doesn't fire a query on every keystroke. Excludes
+  // already-selected users so the same result can't be added twice.
   useEffect(() => {
     if (!visible || !user) return
-    supabase
-      .from('profiles')
-      .select('id, username, avatar_url')
-      .neq('id', user.id)
-      .then(({ data }) => setAllUsers(data ?? []))
-  }, [visible, user])
+    const query = searchQuery.trim()
+    if (!query) {
+      setSearchResults([])
+      setSearching(false)
+      return
+    }
+    setSearching(true)
+    const timeout = setTimeout(async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url')
+        .ilike('username', `%${query}%`)
+        .neq('id', user.id)
+        .limit(20)
+      const selectedIds = new Set(selectedUsers.map((u) => u.id))
+      setSearchResults((data ?? []).filter((p) => !selectedIds.has(p.id)))
+      setSearching(false)
+    }, 300)
+    return () => clearTimeout(timeout)
+  }, [searchQuery, visible, user, selectedUsers])
 
-  function toggleUser(id: string) {
-    setSelectedUserIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+  function addUser(profile: Profile) {
+    setSelectedUsers((prev) => [...prev, profile])
+    setSearchResults((prev) => prev.filter((p) => p.id !== profile.id))
+    setSearchQuery('')
+  }
+
+  function removeUser(id: string) {
+    setSelectedUsers((prev) => prev.filter((p) => p.id !== id))
   }
 
   async function handleCreate() {
@@ -46,7 +66,7 @@ export function CreateGroupModal({ visible, onClose, onCreated }: Props) {
       // what allowed the join-any-conversation IDOR (security-hardening #2).
       const { data, error } = await supabase.rpc('create_group', {
         group_name: groupName.trim(),
-        member_ids: Array.from(selectedUserIds),
+        member_ids: selectedUsers.map((u) => u.id),
       })
       if (error) throw error
       reset()
@@ -60,7 +80,9 @@ export function CreateGroupModal({ visible, onClose, onCreated }: Props) {
 
   function reset() {
     setGroupName('')
-    setSelectedUserIds(new Set())
+    setSearchQuery('')
+    setSearchResults([])
+    setSelectedUsers([])
     setError(null)
   }
 
@@ -69,7 +91,7 @@ export function CreateGroupModal({ visible, onClose, onCreated }: Props) {
     onClose()
   }
 
-  const canCreate = groupName.trim().length > 0 && selectedUserIds.size > 0 && !creating
+  const canCreate = groupName.trim().length > 0 && selectedUsers.length > 0 && !creating
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
@@ -87,21 +109,44 @@ export function CreateGroupModal({ visible, onClose, onCreated }: Props) {
 
           {error && <Text style={styles.error}>{error}</Text>}
 
+          {selectedUsers.length > 0 && (
+            <View style={styles.chipRow}>
+              {selectedUsers.map((u) => (
+                <Pressable key={u.id} style={styles.chip} onPress={() => removeUser(u.id)}>
+                  <Text style={styles.chipText}>{u.username}</Text>
+                  <Text style={styles.chipRemove}>×</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+
+          <TextInput
+            style={styles.input}
+            placeholder="Search by username"
+            placeholderTextColor={colors.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+          />
+
           <FlatList
-            data={allUsers}
+            data={searchResults}
             keyExtractor={(item) => item.id}
             style={styles.list}
-            renderItem={({ item }) => {
-              const selected = selectedUserIds.has(item.id)
-              return (
-                <Pressable style={styles.userRow} onPress={() => toggleUser(item.id)}>
-                  <Text style={styles.userName}>{item.username}</Text>
-                  <View style={[styles.checkbox, selected && styles.checkboxSelected]}>
-                    {selected && <Text style={styles.checkmark}>✓</Text>}
-                  </View>
-                </Pressable>
-              )
-            }}
+            renderItem={({ item }) => (
+              <Pressable style={styles.userRow} onPress={() => addUser(item)}>
+                <Text style={styles.userName}>{item.username}</Text>
+              </Pressable>
+            )}
+            ListEmptyComponent={
+              <Text style={styles.searchHint}>
+                {searching
+                  ? 'Searching…'
+                  : searchQuery.trim()
+                    ? 'No users found.'
+                    : 'Search for people to add.'}
+              </Text>
+            }
           />
 
           <View style={styles.actions}>
@@ -170,23 +215,36 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 16,
   },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: colors.border,
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  chip: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: colors.accent,
+    borderRadius: 16,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    gap: 6,
   },
-  checkboxSelected: {
-    borderColor: colors.accentBright,
-    backgroundColor: colors.accentBright,
-  },
-  checkmark: {
+  chipText: {
     color: colors.white,
     fontSize: 14,
+    fontWeight: '600',
+  },
+  chipRemove: {
+    color: colors.white,
+    fontSize: 16,
     fontWeight: '700',
+    lineHeight: 16,
+  },
+  searchHint: {
+    color: colors.textMuted,
+    textAlign: 'center',
+    paddingVertical: 16,
   },
   actions: {
     flexDirection: 'row',

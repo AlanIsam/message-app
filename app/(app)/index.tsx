@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { View, FlatList, Pressable, Text, StyleSheet, Modal } from 'react-native'
-import { useFocusEffect, useRouter } from 'expo-router'
+import { View, FlatList, Pressable, Text, TextInput, StyleSheet, Modal } from 'react-native'
+import { useFocusEffect, useRouter, useNavigation } from 'expo-router'
+import { Ionicons } from '@expo/vector-icons'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
 import { ConversationItem } from '../../components/ConversationItem'
@@ -11,12 +12,25 @@ import type { Conversation, Profile } from '../../lib/types'
 export default function ConversationListScreen() {
   const { user } = useAuth()
   const router = useRouter()
+  const navigation = useNavigation()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [loading, setLoading] = useState(true)
   const [groupModalVisible, setGroupModalVisible] = useState(false)
   const [dmModalVisible, setDmModalVisible] = useState(false)
   const [fabMenuVisible, setFabMenuVisible] = useState(false)
-  const [allUsers, setAllUsers] = useState<Profile[]>([])
+  const [dmSearchQuery, setDmSearchQuery] = useState('')
+  const [dmSearchResults, setDmSearchResults] = useState<Profile[]>([])
+  const [dmSearching, setDmSearching] = useState(false)
+
+  useEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <Pressable onPress={() => router.push('/(app)/settings')} hitSlop={12} style={styles.headerButton}>
+          <Ionicons name="settings-outline" size={22} color={colors.text} />
+        </Pressable>
+      ),
+    })
+  }, [navigation, router])
 
   const loadConversations = useCallback(async () => {
     if (!user) return
@@ -72,18 +86,39 @@ export default function ConversationListScreen() {
     }
   }, [user, loadConversations])
 
+  // Search-as-you-type instead of listing every user in the system —
+  // debounced so it doesn't fire a query on every keystroke.
   useEffect(() => {
-    if (!user) return
-    supabase
-      .from('profiles')
-      .select('id, username, avatar_url')
-      .neq('id', user.id)
-      .then(({ data }) => setAllUsers(data ?? []))
-  }, [user])
+    if (!dmModalVisible || !user) return
+    const query = dmSearchQuery.trim()
+    if (!query) {
+      setDmSearchResults([])
+      setDmSearching(false)
+      return
+    }
+    setDmSearching(true)
+    const timeout = setTimeout(async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url')
+        .ilike('username', `%${query}%`)
+        .neq('id', user.id)
+        .limit(20)
+      setDmSearchResults(data ?? [])
+      setDmSearching(false)
+    }, 300)
+    return () => clearTimeout(timeout)
+  }, [dmSearchQuery, dmModalVisible, user])
+
+  function closeDmModal() {
+    setDmModalVisible(false)
+    setDmSearchQuery('')
+    setDmSearchResults([])
+  }
 
   async function startDm(otherUserId: string) {
     const { data, error } = await supabase.rpc('create_dm', { other_user_id: otherUserId })
-    setDmModalVisible(false)
+    closeDmModal()
     if (error) return
     router.push(`/(app)/chat/${data}`)
   }
@@ -153,20 +188,38 @@ export default function ConversationListScreen() {
         </Pressable>
       </Modal>
 
-      <Modal visible={dmModalVisible} animationType="slide" transparent onRequestClose={() => setDmModalVisible(false)}>
+      <Modal visible={dmModalVisible} animationType="slide" transparent onRequestClose={closeDmModal}>
         <View style={styles.backdrop}>
           <View style={styles.sheet}>
             <Text style={styles.sheetTitle}>New Direct Message</Text>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by username"
+              placeholderTextColor={colors.textMuted}
+              value={dmSearchQuery}
+              onChangeText={setDmSearchQuery}
+              autoCapitalize="none"
+              autoFocus
+            />
             <FlatList
-              data={allUsers}
+              data={dmSearchResults}
               keyExtractor={(item) => item.id}
               renderItem={({ item }) => (
                 <Pressable style={styles.userRow} onPress={() => startDm(item.id)}>
                   <Text style={styles.userName}>{item.username}</Text>
                 </Pressable>
               )}
+              ListEmptyComponent={
+                <Text style={styles.searchHint}>
+                  {dmSearching
+                    ? 'Searching…'
+                    : dmSearchQuery.trim()
+                      ? 'No users found.'
+                      : 'Start typing a username to search.'}
+                </Text>
+              }
             />
-            <Pressable style={styles.cancelButton} onPress={() => setDmModalVisible(false)}>
+            <Pressable style={styles.cancelButton} onPress={closeDmModal}>
               <Text style={styles.cancelText}>Cancel</Text>
             </Pressable>
           </View>
@@ -259,6 +312,24 @@ const styles = StyleSheet.create({
   userName: {
     color: colors.text,
     fontSize: 16,
+  },
+  searchInput: {
+    backgroundColor: colors.background,
+    color: colors.text,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  searchHint: {
+    color: colors.textMuted,
+    textAlign: 'center',
+    paddingVertical: 20,
+  },
+  headerButton: {
+    marginRight: 4,
   },
   cancelButton: {
     marginTop: 12,

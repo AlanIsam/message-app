@@ -32,6 +32,7 @@ export default function AppLayout() {
       >
         <Stack.Screen name="index" options={{ title: 'Chats' }} />
         <Stack.Screen name="chat/[id]" options={{ title: '' }} />
+        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
       </Stack>
     </PresenceProvider>
   )
