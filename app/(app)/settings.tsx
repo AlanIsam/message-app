@@ -1,9 +1,27 @@
 import { useEffect, useState } from 'react'
-import { View, Text, TextInput, Pressable, Image, StyleSheet, ActivityIndicator, Alert } from 'react-native'
+import { View, Text, TextInput, Pressable, Image, StyleSheet, ActivityIndicator, Alert, Platform } from 'react-native'
 import * as ImagePicker from 'expo-image-picker'
+import * as FileSystem from 'expo-file-system'
+import { decode } from 'base64-arraybuffer'
 import { useAuth } from '../../hooks/useAuth'
 import { supabase } from '../../lib/supabase'
 import { colors } from '../../constants/colors'
+
+// fetch(uri).blob() is unreliable for local file:// URIs on Android (a
+// well-documented Expo/Supabase Storage gotcha — reports show it silently
+// producing empty/corrupt blobs, or the fetch itself throwing "Network
+// request failed"). Reading the file as base64 via expo-file-system and
+// decoding to an ArrayBuffer is the approach Supabase's own docs recommend
+// for native. The web file input's blob: URI doesn't have this problem, so
+// it keeps using the simpler fetch().blob() path.
+async function readImageForUpload(uri: string): Promise<ArrayBuffer | Blob> {
+  if (Platform.OS === 'web') {
+    const response = await fetch(uri)
+    return await response.blob()
+  }
+  const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 })
+  return decode(base64)
+}
 
 export default function SettingsScreen() {
   const { user, signOut } = useAuth()
@@ -67,16 +85,16 @@ export default function SettingsScreen() {
     setUploadingPhoto(true)
     try {
       const asset = result.assets[0]
-      const response = await fetch(asset.uri)
-      const blob = await response.blob()
+      const fileData = await readImageForUpload(asset.uri)
       const ext = asset.uri.split('.').pop()?.split('?')[0] || 'jpg'
+      const contentType = asset.mimeType || `image/${ext}`
       // Same path every time (upsert: true) — avoids leaving old photos
       // behind in storage under a per-upload unique name.
       const path = `${user.id}/avatar.${ext}`
 
       const { error: uploadError } = await supabase.storage
         .from('avatars')
-        .upload(path, blob, { upsert: true, contentType: blob.type || `image/${ext}` })
+        .upload(path, fileData, { upsert: true, contentType })
       if (uploadError) throw uploadError
 
       const { data: publicUrlData } = supabase.storage.from('avatars').getPublicUrl(path)
