@@ -757,11 +757,15 @@ Apple Developer Program is a paid, separate setup not pursued here).
   "load more on scroll" would need `.range()` on the messages query plus
   some care around how it interacts with the realtime subscription's local
   state.
-- **In-app sound** — `assets/sounds/message.mp3` is a plain-text placeholder
-  (see README §5). The `useMessageSound` hook's error handling was written
-  defensively (wraps both `createAsync` and `replayAsync` in try/catch) so a
-  bad file fails silently rather than crashing, but nobody has actually heard
-  it play. Swap in a real short audio file and confirm.
+- **In-app sound** — `assets/sounds/message.mp3` turned out to already be a
+  real file (valid ID3 header, ~46KB), not the plain-text placeholder this
+  entry previously assumed — corrected after actually checking the bytes
+  while writing up §6.14's push notification setup. The `useMessageSound`
+  hook's error handling was still written defensively either way (wraps
+  both `createAsync` and `replayAsync` in try/catch) so a bad file would
+  fail silently rather than crash, but nobody has explicitly confirmed
+  hearing it play during a real test — worth a quick listen-through rather
+  than assuming it's broken or assuming it's fine.
 - **Push notifications (Phase 5 Part B)** — verified working end-to-end on
   Android; see §6.14 for the full setup saga (five separate fixes were
   needed: placeholder icon files, missing git repo, gitignored
