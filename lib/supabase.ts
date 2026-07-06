@@ -1,5 +1,12 @@
 import 'react-native-get-random-values'
 import 'react-native-url-polyfill/auto'
+// Hermes (React Native's JS engine) doesn't implement TextEncoder/
+// TextDecoder natively. @supabase/realtime-js needs them to handle
+// WebSocket frames — without this, every realtime channel (messages,
+// presence, typing) throws "Property 'TextDecoder' doesn't exist" and
+// closes/reconnects in a loop. Pure JS, no native code, so no rebuild
+// needed (unlike expo-image-picker/expo-file-system).
+import 'fast-text-encoding'
 import { createClient } from '@supabase/supabase-js'
 import { Platform } from 'react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
