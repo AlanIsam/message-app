@@ -11,22 +11,30 @@ overriding the weaker policies drafted in `overview.md` / `phase-4` / `phase-5`.
 
 ## 1. Current status
 
-All 5 phases + security hardening + one post-launch feature request are implemented
-and manually verified against a live Supabase project with two real accounts
-(`alansam` and `Atmin`) talking to each other:
+All 5 phases + security hardening + a long tail of post-launch feature requests
+are implemented and manually verified against a live Supabase project with two
+real accounts (`alansam` and `Atmin`) talking to each other, including on a
+real Android device:
 
 | Feature | Status |
 |---|---|
 | Auth (register/login, session persistence) | ✅ verified |
 | Realtime 1:1 messaging | ✅ verified |
+| Message pagination (20/page, cursor-based load-more on scroll) | ✅ verified — see §5.1 |
 | Presence (online badges) | ✅ verified |
 | Typing indicators | ✅ verified |
 | Groups (create, message, member list) | ✅ verified |
-| In-app sound on message receive | ⚠️ wired up, untested (placeholder audio file — see §6) |
+| Search-by-username for starting DMs / adding group members | ✅ verified |
+| Settings screen (username edit, avatar upload, log out) | ✅ verified |
+| Avatars rendered in conversation list + chat header | ✅ verified — see §7 |
+| In-app sound on message receive | ✅ real audio file, wired up (not explicitly confirmed audible — see §7) |
 | Android push notifications | ✅ verified end-to-end on a real device (webhook → Edge Function → Expo push → device, with vibration) — see §6.14 |
+| Push notification title/body format (sender username / message) | ✅ verified |
+| Suppress push while recipient has that chat open | ✅ verified — see §6.15 |
 | Live-updating conversation list (no manual refresh) | ✅ verified |
 | Unread bold text + count badge | ✅ verified |
 | "Unread messages" divider inside a chat | ✅ verified |
+| Custom app icon/branding ("Randau") | ✅ verified |
 
 ---
 
@@ -36,34 +44,54 @@ and manually verified against a live Supabase project with two real accounts
 app/
 ├── _layout.tsx              Root: AuthContext provider, notification handler/listener
 ├── (auth)/                  Login/register stack, redirects to (app) if session exists
+│   ├── login.tsx
+│   └── register.tsx
 └── (app)/
     ├── _layout.tsx          Redirects to login if no session; wraps PresenceProvider;
     │                        registers push token on login
     ├── index.tsx            Conversation list — see §4 for its realtime design
-    └── chat/[id].tsx         Chat screen — see §5 for the unread-tracking design
+    ├── settings.tsx         Username edit, avatar upload, log out
+    └── chat/[id].tsx        Chat screen — see §5 for unread tracking, §5.1 for pagination
+
+components/
+├── ConversationItem.tsx     One row in the conversation list — avatar/initial, name, badges
+├── CreateGroupModal.tsx     Group creation sheet — debounced username search + multi-select chips
+├── MessageBubble.tsx        One chat message — sender name (groups), content, timestamp
+├── MessageInput.tsx         Text input + send button; Enter sends, Shift+Enter newlines
+└── OnlineBadge.tsx          Small colored dot (online/offline)
 
 hooks/
 ├── useAuth.ts               Session state + signIn/signUp/signOut
-├── useMessages.ts           Per-conversation message fetch + realtime subscription
-├── usePresence.ts           Global online-users presence channel
+├── useMessages.ts           Per-conversation message fetch + pagination + realtime subscription
+├── usePresence.ts           last_seen_at heartbeat + poll (NOT Phoenix Presence — see §6.12)
 ├── usePresenceContext.tsx   React context wrapper around usePresence
 ├── useTyping.ts             Per-conversation typing broadcast channel
 ├── useMessageSound.ts       Preloads + plays assets/sounds/message.mp3
-└── usePushToken.ts          Expo push token registration + storage in user_devices
+└── usePushToken.ts          Push token registration, Android notification channel setup
 
 lib/
 ├── supabase.ts              Client singleton — SecureStore on native, AsyncStorage on web
 └── types.ts                 Shared Profile / Message / Conversation types
 
+constants/
+└── colors.ts                Forest Dark palette — import from here, never hardcode hex
+
 supabase/
 ├── schema.sql                Full schema for a FRESH project (run once, top to bottom)
 ├── migrations/                Incremental changes for a project that already ran schema.sql
-│   ├── 002_unread_tracking.sql          last_read_at column, mark_conversation_read(), get_conversations()
-│   ├── 003_unread_divider.sql           open_conversation() — atomic read-then-advance
-│   ├── 004_realtime_authorization.sql   realtime.messages policies for typing + presence
-│   └── 005_postgres_changes_private.sql realtime.messages policy for postgres_changes — see §6.9
+│   ├── 002_unread_tracking.sql              last_read_at column, mark_conversation_read(), get_conversations()
+│   ├── 003_unread_divider.sql               open_conversation() — atomic read-then-advance
+│   ├── 004_realtime_authorization.sql       realtime.messages policies for typing + presence — DORMANT, see §3
+│   ├── 005_postgres_changes_private.sql     realtime.messages policy for postgres_changes — DORMANT, see §6.9
+│   ├── 006_last_seen_heartbeat.sql          last_seen_at column — see §6.12
+│   ├── 007_avatars_storage.sql              avatars storage bucket + per-user-folder RLS
+│   ├── 008_active_conversation_tracking.sql active_conversation_id column — see §6.15
+│   └── 009_conversation_list_avatar.sql     get_conversations() returns other_avatar_url — see §7
 └── functions/notify/index.ts  Push notification Edge Function (Phase 5 Part B)
 ```
+
+See `API_REFERENCE.md` for every hook/RPC/component's actual signature and
+parameters — this tree is just the map of where things live.
 
 **Rule of thumb for future schema changes:** never re-run `schema.sql` against
 a project that already has the tables — it has no `IF NOT EXISTS` guards on
@@ -130,12 +158,15 @@ also holds two long-lived subscriptions for the lifetime of the mounted
 screen:
 
 ```ts
-supabase.channel('conversation-list-messages')
+supabase.channel(`conversation-list-messages:${instanceId}`)
   .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => loadConversations())
 
-supabase.channel('conversation-list-membership')
+supabase.channel(`conversation-list-membership:${instanceId}`)
   .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversation_members', filter: `user_id=eq.${user.id}` }, () => loadConversations())
 ```
+(`instanceId` is a unique-per-mount suffix — see §6.13 for why; it's
+client-side multiplexing only and doesn't affect which rows postgres_changes
+delivers.)
 
 The messages subscription has **no filter** — it listens for every INSERT on
 the whole table and just refetches. That's intentional and safe: RLS means
@@ -176,6 +207,42 @@ const firstUnreadMessageId = messages.find(
 This mirrors `get_conversations()`'s SQL exactly (`sender_id != auth.uid()`
 and `created_at > last_read_at`) so the divider and the badge count that led
 you here always agree.
+
+### 5.1 Message pagination (`hooks/useMessages.ts`)
+
+Loads 20 messages at a time (`PAGE_SIZE`), both initially and per
+"load more" batch, instead of a single fixed window. Two things matter about
+how "load more" is implemented:
+
+- **Cursor-based, not offset/page-number-based.** `loadMoreMessages()`
+  queries `where created_at < oldest_loaded_message.created_at order by
+  created_at desc limit 20`, using the oldest currently-loaded message's own
+  timestamp as the cursor. An offset/page-number scheme (`.range(20, 40)`,
+  etc.) would silently produce duplicates or gaps if a new message arrives
+  via realtime while the user has scrolled up — every row's offset shifts
+  by one, but the client doesn't know that happened. A `created_at`-based
+  cursor is immune to this, since new messages always sort after it.
+- **The chat screen's `FlatList` is `inverted`**, so "scroll up for older
+  history" is triggered by `onEndReached` — inverted flips *rendering*
+  direction, but "end of data" for `onEndReached`'s purposes is still the
+  last item in the underlying array, which is the oldest message,
+  which renders at the visual top. `ListFooterComponent` (which renders at
+  the visual top for the same reason) shows the "loading more" spinner.
+
+One non-obvious interaction this pagination change exposed: the chat
+screen previously had `useEffect(() => flatListRef.current?.scrollToOffset(...),
+[messages.length])` to auto-scroll to the newest message. That fires on
+*any* length change — including `loadMoreMessages` prepending older history
+— which would yank the view back to the bottom while the user is mid-scroll
+reading older messages. Fixed by keying the effect off the **newest**
+message's `id` instead of `messages.length`, so it only fires when a message
+is actually sent or arrives, never when older history is prepended:
+```ts
+const lastMessageId = messages[messages.length - 1]?.id
+useEffect(() => {
+  if (lastMessageId) flatListRef.current?.scrollToOffset({ offset: 0, animated: true })
+}, [lastMessageId])
+```
 
 ---
 
@@ -737,6 +804,51 @@ Apple Developer Program is a paid, separate setup not pursued here).
 
 ---
 
+### 6.15 — Suppressing pushes for a chat the recipient already has open
+
+A user reported "notifications keep firing even when I'm on the chat screen
+with the recipient." The fix itself was straightforward: `profiles` gained an
+`active_conversation_id` column (`migrations/008_active_conversation_tracking.sql`),
+`app/(app)/chat/[id].tsx` writes it whenever a chat is genuinely being viewed,
+and `supabase/functions/notify/index.ts` filters that user out of the
+recipient list before calling Expo's push API.
+
+The subtlety is in what "genuinely being viewed" means:
+```ts
+setActiveConversation(isFocused && AppState.currentState === 'active')
+```
+`useIsFocused()` (navigation focus) is **not enough by itself** — expo-router
+keeps a screen "focused" in the navigation sense even while the whole app is
+backgrounded (e.g. phone locked, or the user switched to another app without
+navigating away in-app). Combining it with `AppState.currentState === 'active'`
+is what actually captures "this exact screen is on top and the app is in the
+foreground." Both an `AppState` listener and the initial mount value need
+this same check, and the cleanup function must clear it back to `null`
+(`setActiveConversation(false)`) — otherwise leaving the chat (unmounting)
+would leave the row stuck pointing at a conversation the user is no longer
+looking at, permanently suppressing pushes for it.
+
+**Verifying this in practice took longer than the fix itself**, entirely
+because of a diagnostic dead end worth recording: initial DB checks showed
+`active_conversation_id` as `null` for both test accounts, which looked like
+the write was failing. The actual cause was mundane — the two accounts were
+being checked across two different devices (`alansam` on a browser, `Atmin`
+on the phone) without being explicit about which device's state was being
+read at each step, so the "failing" account was sometimes just the wrong one
+to be checking. Resolved by adding a temporary on-screen debug banner (not
+console-only — the user had no terminal access to their phone's Metro
+session) that showed `isFocused`/`AppState`/the update's actual returned row
+(`.update(...).select('id, active_conversation_id')`), cross-checked against
+`user_devices` to confirm which push token belonged to which physical device.
+Once both sides were tested against the correct device, the feature worked
+exactly as designed on the first real implementation — **no code fix was
+actually needed once the test was set up correctly.** All debug
+instrumentation was removed afterward; if this exact "it's not working"
+report resurfaces, check which device is actually being inspected before
+assuming the code regressed.
+
+---
+
 ## 7. Known gaps / next things to look at
 
 - **Realtime Authorization for typing/presence** — attempted and abandoned;
@@ -752,11 +864,6 @@ Apple Developer Program is a paid, separate setup not pursued here).
   this without re-reading §6.11 first. `poll()` currently reads the whole
   `profiles` table on every cycle; scope it to shared-conversation users
   before this app has more than a handful of accounts.
-- **Message pagination** — chat screen loads the last 50 messages and never
-  paginates further back. Fine per the original spec's scope, but a real
-  "load more on scroll" would need `.range()` on the messages query plus
-  some care around how it interacts with the realtime subscription's local
-  state.
 - **In-app sound** — `assets/sounds/message.mp3` turned out to already be a
   real file (valid ID3 header, ~46KB), not the plain-text placeholder this
   entry previously assumed — corrected after actually checking the bytes
@@ -773,12 +880,18 @@ Apple Developer Program is a paid, separate setup not pursued here).
   never assigned to the push-notification role, and a missing Android
   notification channel for sound/vibration). iOS was not attempted — it
   needs a paid Apple Developer Program enrollment, which wasn't pursued in
-  this pass. The `notify` Edge Function still doesn't check Expo's push API
-  response (`data[].status`/`message`) — it returns `200 ok` regardless of
-  whether Expo/FCM actually accepted the notification, which is exactly
-  what made the FCM-credential bug in §6.14 hard to see at first. Worth
-  adding real error handling there before relying on this in anything more
-  than a side project.
+  this pass. The `notify` Edge Function now logs (`console.error`) when
+  Expo's push API reports a per-message error in its response — added after
+  the FCM-credential bug in §6.14 showed a `200 ok` alone isn't enough signal.
+- **Other users' avatars weren't rendered anywhere** — `get_conversations()`
+  never selected `avatar_url` for the other member, so the conversation list
+  and chat header only ever showed a first-letter initial, for every user,
+  always. Looked like a caching bug at first (uploading a new photo on one
+  device "didn't show" on another) but there was never an image element to
+  update. Fixed in migration `009_conversation_list_avatar.sql` (adds
+  `other_avatar_url` to the RPC) plus rendering in
+  `components/ConversationItem.tsx` and the chat header in
+  `app/(app)/chat/[id].tsx`.
 - **Conversation list refetch-on-every-message** — see §4's last paragraph.
   Fine now, first thing to optimize if this ever needs to scale.
 - **Group leave/remove-member/rename** — out of scope per

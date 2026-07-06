@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { View, FlatList, Text, StyleSheet, KeyboardAvoidingView, Platform, AppState } from 'react-native'
+import {
+  View,
+  FlatList,
+  Text,
+  Image,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  AppState,
+  ActivityIndicator,
+} from 'react-native'
 import { useLocalSearchParams, useNavigation } from 'expo-router'
 import { useIsFocused } from '@react-navigation/native'
 import { supabase } from '../../../lib/supabase'
@@ -36,9 +46,13 @@ export default function ChatScreen() {
   const [unreadCutoff, setUnreadCutoff] = useState<string | null>(null)
   const openedForId = useRef<string | null>(null)
 
-  const { messages, loading, sendMessage } = useMessages(id, user?.id, () => {
-    playMessageSound()
-  })
+  const { messages, loading, loadingMore, hasMore, sendMessage, loadMoreMessages } = useMessages(
+    id,
+    user?.id,
+    () => {
+      playMessageSound()
+    }
+  )
   const { typingUsers, notifyTyping } = useTyping(id, currentProfile.current)
 
   useEffect(() => {
@@ -84,21 +98,44 @@ export default function ChatScreen() {
     if (!details) return
     const online = details.otherUser ? isOnline(details.otherUser.id) : false
     navigation.setOptions({
-      title: details.is_group ? details.name ?? 'Group' : details.otherUser?.username ?? '',
-      headerRight: !details.is_group
-        ? () => (
-            <View style={styles.headerStatus}>
-              <OnlineBadge online={online} size={8} />
-              <Text style={styles.headerStatusText}>{online ? 'online' : 'offline'}</Text>
+      headerTitle: () => (
+        <View style={styles.headerTitleWrap}>
+          {!details.is_group && details.otherUser?.avatar_url ? (
+            <Image source={{ uri: details.otherUser.avatar_url }} style={styles.headerAvatar} />
+          ) : !details.is_group ? (
+            <View style={styles.headerAvatarPlaceholder}>
+              <Text style={styles.headerAvatarInitial}>
+                {(details.otherUser?.username ?? '?').charAt(0).toUpperCase()}
+              </Text>
             </View>
-          )
-        : undefined,
+          ) : null}
+          <View>
+            <Text style={styles.headerTitleText} numberOfLines={1}>
+              {details.is_group ? details.name ?? 'Group' : details.otherUser?.username ?? ''}
+            </Text>
+            {!details.is_group && (
+              <View style={styles.headerStatus}>
+                <OnlineBadge online={online} size={8} />
+                <Text style={styles.headerStatusText}>{online ? 'online' : 'offline'}</Text>
+              </View>
+            )}
+          </View>
+        </View>
+      ),
     })
   }, [details, navigation, isOnline])
 
+  // Scrolls to the newest message when it actually changes (a message was
+  // sent or arrived via realtime) — but NOT when loadMoreMessages prepends
+  // older history while the user has scrolled up, since messages.length
+  // alone can't tell those two cases apart and the naive version would yank
+  // the view back down mid-scroll every time older messages load.
+  const lastMessageId = messages[messages.length - 1]?.id
   useEffect(() => {
-    flatListRef.current?.scrollToOffset({ offset: 0, animated: true })
-  }, [messages.length])
+    if (lastMessageId) {
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true })
+    }
+  }, [lastMessageId])
 
   // First focus on a given conversation: atomically grab the previous
   // last_read_at (to draw the "Unread messages" divider below) and advance
@@ -181,6 +218,19 @@ export default function ChatScreen() {
         keyExtractor={(item) => item.id}
         inverted
         contentContainerStyle={styles.list}
+        onEndReached={hasMore ? loadMoreMessages : undefined}
+        onEndReachedThreshold={0.3}
+        ListFooterComponent={
+          // Renders at the visual top, not the bottom — `inverted` flips
+          // layout, and "end of data" (oldest messages) is what's on screen
+          // up there. That's exactly where a "loading older messages"
+          // spinner belongs.
+          loadingMore ? (
+            <View style={styles.loadingMore}>
+              <ActivityIndicator color={colors.textMuted} size="small" />
+            </View>
+          ) : null
+        }
         renderItem={({ item, index }) => {
           const isOwn = item.sender_id === user?.id
           const next = messages[messages.length - 1 - index - 1]
@@ -244,6 +294,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     transform: [{ scaleY: -1 }],
   },
+  loadingMore: {
+    paddingVertical: 12,
+    transform: [{ scaleY: -1 }],
+  },
   emptyText: {
     color: colors.textMuted,
   },
@@ -273,10 +327,37 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontStyle: 'italic',
   },
+  headerTitleWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  headerAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  headerAvatarPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerAvatarInitial: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  headerTitleText: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '600',
+  },
   headerStatus: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 12,
     gap: 6,
   },
   headerStatusText: {

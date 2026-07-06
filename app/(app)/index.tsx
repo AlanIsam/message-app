@@ -138,6 +138,7 @@ export default function ConversationListScreen() {
         renderItem={({ item }) => (
           <ConversationItem
             name={item.is_group ? item.name ?? 'Group' : item.other_username ?? 'Direct Message'}
+            avatarUrl={item.is_group ? undefined : item.other_avatar_url}
             lastMessage={item.last_message ?? undefined}
             lastMessageTime={
               item.last_message_at

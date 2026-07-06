@@ -1,10 +1,13 @@
-# Chat App
+# Randau
 
-Discord-like chat built with Expo (React Native + Web) and Supabase — realtime
-messaging, presence, typing indicators, groups, and Android push notifications.
-Implements all 5 phases from `requirement/` plus the corrections in
-`requirement/security-hardening.md` (that doc supersedes the RLS policies drafted
-in `overview.md`, `phase-4`, and `phase-5`).
+Discord/WhatsApp-like chat built with Expo (React Native + Web) and Supabase —
+realtime messaging with paginated history, presence, typing indicators,
+groups, searchable user lookup, a profile/settings screen, and Android push
+notifications. Implements all 5 phases from `requirement/` plus the
+corrections in `requirement/security-hardening.md` (that doc supersedes the
+RLS policies drafted in `overview.md`, `phase-4`, and `phase-5`), plus several
+post-launch feature requests — see `documentation.md` §1 for the full status
+table.
 
 ## 1. Install dependencies
 
@@ -19,9 +22,11 @@ npm install
    This creates all tables, RLS policies, the `is_member` helper, and the
    `create_group` / `create_dm` RPCs used instead of direct client inserts.
 3. Database → Replication → enable `INSERT` events on the `messages` table.
-4. Database → Realtime → enable Realtime Authorization, and add the
-   `realtime.messages` policy shown commented at the bottom of `schema.sql` so
-   typing/presence channels are membership-gated (security-hardening #6).
+4. Leave Project Settings → Realtime → "Allow public access to channels" at
+   its default (**on**) — don't disable it. A prior attempt to lock this down
+   with private channels was tried and reverted (see `documentation.md`
+   §6.9/§6.10); the policies near the bottom of `schema.sql` are dormant,
+   kept for reference only.
 5. Authentication → Providers → Email: require email confirmation.
 6. Authentication → Policies: turn on leaked-password protection, set minimum
    password length to 10, enable CAPTCHA (hCaptcha/Turnstile).
@@ -45,14 +50,13 @@ security boundary, not keeping this key secret.
 npx expo start        # then press `w` for web, or scan the QR code for Android
 ```
 
-## 5. Replace placeholder assets
+## 5. App assets
 
-`assets/icon.png` was scaffolded as a plain-text placeholder (not a real
-image) and isn't currently referenced anywhere in `app.config.js`, so it
-doesn't block anything — but swap it for a real PNG before shipping.
-`assets/notification-icon.png` and `assets/sounds/message.mp3` are already
-real files (a generated icon and a real short MP3, respectively) — no
-action needed for either.
+`assets/icon.png`, `assets/adaptive-icon.png`, and `assets/notification-icon.png`
+are the real "Randau" app icons (custom-designed, not placeholders).
+`assets/sounds/message.mp3` is a real short MP3. Nothing here needs replacing
+before shipping unless you want your own branding — see `app.config.js` for
+where each is referenced.
 
 ## 6. Push notifications (Android)
 
@@ -241,7 +245,13 @@ policy and groups/DMs are created via the `create_group(name, member_ids)` and
 
 ## Known limitations (out of scope by design, see requirement/*.md)
 
-- No message pagination beyond the last 50 per conversation
 - No group leave/remove-member/rename UI
 - No light mode
+- No iOS push notifications (needs a paid Apple Developer Program enrollment; not pursued)
 - Web has no background push notifications (FCM/Expo push is Android-only per phase-5)
+
+## Extending the app
+
+See `API_REFERENCE.md` for a full rundown of every RPC function, Edge
+Function, hook, and component you're likely to touch when adding a feature —
+written for exactly this purpose.

@@ -4,6 +4,11 @@ import type { Message, Profile } from '../lib/types'
 
 type MessageWithSender = Message & { profiles: Profile | null }
 
+// Page size for both the initial load and each "load more on scroll up"
+// batch. Small on purpose — a chat screen only needs enough to fill the
+// viewport at first paint; older history loads on demand via loadMoreMessages.
+const PAGE_SIZE = 20
+
 export function useMessages(
   conversationId: string,
   currentUserId: string | undefined,
@@ -11,24 +16,28 @@ export function useMessages(
 ) {
   const [messages, setMessages] = useState<MessageWithSender[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
   // Keyed by user id — avoids an extra DB round trip per realtime insert,
   // since payload.new never includes joined `profiles` data (phase-2 gotcha).
   const profilesCache = useRef<Map<string, Profile>>(new Map())
 
   useEffect(() => {
     let cancelled = false
+    setHasMore(true)
 
     async function fetchMessages() {
       setLoading(true)
-      // Fetch the most recent 50 (descending), then reverse into chronological
-      // order — fetching ascending+limit(50) would grab the OLDEST 50 instead,
-      // silently dropping new messages once a conversation passes 50 total.
+      // Fetch the most recent page (descending), then reverse into
+      // chronological order — fetching ascending+limit would grab the
+      // OLDEST rows instead, silently dropping new messages once a
+      // conversation passes one page of total messages.
       const { data } = await supabase
         .from('messages')
         .select('*, profiles(id, username, avatar_url)')
         .eq('conversation_id', conversationId)
         .order('created_at', { ascending: false })
-        .limit(50)
+        .limit(PAGE_SIZE)
 
       if (cancelled) return
 
@@ -37,6 +46,7 @@ export function useMessages(
         if (row.profiles) profilesCache.current.set(row.sender_id, row.profiles)
       })
       setMessages(rows)
+      setHasMore(rows.length === PAGE_SIZE)
       setLoading(false)
     }
 
@@ -109,5 +119,36 @@ export function useMessages(
     // our own insert back, and appending twice would duplicate it (phase-2).
   }
 
-  return { messages, loading, sendMessage }
+  // Cursor-based, not offset-based: paging by `created_at < oldest loaded
+  // message` stays correct even if new messages arrive via realtime while
+  // the user has scrolled up, unlike an offset/page-number scheme which
+  // would shift under a concurrent insert and produce duplicates or gaps.
+  async function loadMoreMessages() {
+    if (loadingMore || !hasMore || messages.length === 0) return
+    setLoadingMore(true)
+    try {
+      const oldest = messages[0].created_at
+      const { data } = await supabase
+        .from('messages')
+        .select('*, profiles(id, username, avatar_url)')
+        .eq('conversation_id', conversationId)
+        .lt('created_at', oldest)
+        .order('created_at', { ascending: false })
+        .limit(PAGE_SIZE)
+
+      const rows = ((data ?? []) as MessageWithSender[]).reverse()
+      rows.forEach((row) => {
+        if (row.profiles) profilesCache.current.set(row.sender_id, row.profiles)
+      })
+      setHasMore(rows.length === PAGE_SIZE)
+      setMessages((prev) => {
+        const existingIds = new Set(prev.map((m) => m.id))
+        return [...rows.filter((r) => !existingIds.has(r.id)), ...prev]
+      })
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  return { messages, loading, loadingMore, hasMore, sendMessage, loadMoreMessages }
 }

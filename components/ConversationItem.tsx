@@ -1,10 +1,11 @@
-import { View, Text, Pressable, StyleSheet } from 'react-native'
+import { View, Text, Image, Pressable, StyleSheet } from 'react-native'
 import { colors } from '../constants/colors'
 import { OnlineBadge } from './OnlineBadge'
 import { usePresenceContext } from '../hooks/usePresenceContext'
 
 type Props = {
   name: string
+  avatarUrl?: string | null
   lastMessage?: string
   lastMessageTime?: string
   isGroup: boolean
@@ -15,6 +16,7 @@ type Props = {
 
 export function ConversationItem({
   name,
+  avatarUrl,
   lastMessage,
   lastMessageTime,
   isGroup,
@@ -29,9 +31,13 @@ export function ConversationItem({
   return (
     <Pressable style={styles.row} onPress={onPress}>
       <View style={styles.avatarWrap}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarInitial}>{name.charAt(0).toUpperCase()}</Text>
-        </View>
+        {avatarUrl ? (
+          <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+        ) : (
+          <View style={styles.avatar}>
+            <Text style={styles.avatarInitial}>{name.charAt(0).toUpperCase()}</Text>
+          </View>
+        )}
         {!isGroup && otherUserId && (
           <View style={styles.badgeWrap}>
             <OnlineBadge online={online} />

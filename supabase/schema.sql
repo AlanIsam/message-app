@@ -211,6 +211,7 @@ returns table (
   last_message_at timestamptz,
   other_user_id uuid,
   other_username text,
+  other_avatar_url text,
   unread_count bigint
 )
 language sql security definer stable
@@ -224,6 +225,7 @@ as $$
     lm.created_at as last_message_at,
     ou.id as other_user_id,
     ou.username as other_username,
+    ou.avatar_url as other_avatar_url,
     coalesce(uc.unread_count, 0) as unread_count
   from public.conversation_members cm
   join public.conversations c on c.id = cm.conversation_id
@@ -235,7 +237,7 @@ as $$
     limit 1
   ) lm on true
   left join lateral (
-    select p.id, p.username
+    select p.id, p.username, p.avatar_url
     from public.conversation_members cm2
     join public.profiles p on p.id = cm2.user_id
     where cm2.conversation_id = c.id
@@ -315,21 +317,27 @@ create policy "own devices only"
 -- After running this file:
 -- 1. Supabase Dashboard → Database → Replication → enable the `messages` table
 --    for INSERT events.
--- 2. Supabase Dashboard → Project Settings → Realtime → disable "Allow public
---    access to channels". This enforces private channels project-wide.
---    IMPORTANT: once disabled, this rejects ANY non-private channel outright
---    — including postgres_changes ones — with "CHANNEL_ERROR PrivateOnly:
---    This project only allows private channels", contrary to what Supabase's
---    own docs suggest. All three channels this app uses are therefore
---    private (see hooks/useMessages.ts, useTyping.ts, usePresence.ts) and
---    need the policies below. See documentation.md §6.9 for the full story.
+-- 2. Leave Project Settings → Realtime → "Allow public access to channels"
+--    at its default (ON). A prior attempt to lock this down (disable public
+--    access + require private channels + the policies below) was tried and
+--    reverted — see documentation.md §6.9/§6.10 for the full story of why.
+--    None of the three channels this app actually joins (see
+--    hooks/useMessages.ts, useTyping.ts) pass `private: true`, so disabling
+--    public access here would reject all of them outright with
+--    "CHANNEL_ERROR PrivateOnly: This project only allows private channels".
+--    The policies below are kept for reference only and are NOT required for
+--    a fresh install to work — postgres_changes re-checks the `messages`
+--    table's own RLS per event regardless of channel privacy, and
+--    typing/presence are public on purpose (security-hardening.md rates
+--    unauthorized access to them as low-severity, "a visual nicety").
 
--- messages:<conversationId> (postgres_changes) — authorizes the channel join
--- for any authenticated user. NOT scoped by conversation membership per
--- topic on purpose: per-row filtering is separately and already enforced by
--- the `messages` table's own RLS ("members read messages" above), which
--- postgres_changes re-checks per event regardless of channel privacy.
--- Scoping this policy by topic too would be redundant, not more secure.
+-- messages:<conversationId> (postgres_changes) — DORMANT (see note above).
+-- Authorizes the channel join for any authenticated user. NOT scoped by
+-- conversation membership per topic on purpose: per-row filtering is
+-- separately and already enforced by the `messages` table's own RLS
+-- ("members read messages" above), which postgres_changes re-checks per
+-- event regardless of channel privacy. Scoping this policy by topic too
+-- would be redundant, not more secure.
 create policy "authenticated can use postgres_changes"
 on "realtime"."messages"
 for select
@@ -338,7 +346,8 @@ using (
   realtime.messages.extension = 'postgres_changes'
 );
 
--- typing:<conversationId> (broadcast) — membership-gated, since Broadcast
+-- typing:<conversationId> (broadcast) — DORMANT (see note above). Would be
+-- membership-gated if private channels were ever re-enabled, since Broadcast
 -- does NOT inherit table RLS the way postgres_changes does.
 create policy "members receive typing broadcast"
 on "realtime"."messages"
