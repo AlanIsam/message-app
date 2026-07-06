@@ -74,6 +74,11 @@ Deno.serve(async (req) => {
         title: 'New message',
         body: record.content,
         data: { conversationId: record.conversation_id },
+        // Must match the Android notification channel created in
+        // hooks/usePushToken.ts — without it, Android routes the
+        // notification through an auto-created channel with no sound or
+        // vibration, regardless of the "sound" field above.
+        channelId: 'messages',
       }))
     ),
   })
