@@ -14,3 +14,4 @@ google-services.json
 npm-debug.*
 *.log
 .DS_Store
+supabase/.temp/
