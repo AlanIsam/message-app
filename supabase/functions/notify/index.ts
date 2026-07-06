@@ -62,16 +62,23 @@ Deno.serve(async (req) => {
   const tokens = [...new Set((devices ?? []).map((d) => d.expo_push_token))]
   if (tokens.length === 0) return new Response('ok')
 
-  // Treat `record.content` as untrusted input — it's only ever placed in the
-  // notification body, never interpolated into anything executable.
-  await fetch('https://exp.host/--/api/v2/push/send', {
+  const { data: sender } = await admin
+    .from('profiles')
+    .select('username')
+    .eq('id', record.sender_id)
+    .single()
+
+  // Treat `record.content` and the sender's username as untrusted input —
+  // they're only ever placed in the notification title/body, never
+  // interpolated into anything executable.
+  const pushResponse = await fetch('https://exp.host/--/api/v2/push/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(
       tokens.map((to) => ({
         to,
         sound: 'default',
-        title: 'New message',
+        title: sender?.username ?? 'New message',
         body: record.content,
         data: { conversationId: record.conversation_id },
         // Must match the Android notification channel created in
@@ -82,6 +89,16 @@ Deno.serve(async (req) => {
       }))
     ),
   })
+
+  // Expo's push API can return 200 with a per-message error in the body
+  // (e.g. bad/expired token, FCM credential problems) — logging it here is
+  // the only way to see that class of failure, since a 200 from this
+  // function otherwise says nothing about whether the push was actually
+  // accepted downstream. See documentation.md §6.14 for a case where this
+  // silently masked a credential misconfiguration for a while.
+  const pushResult = await pushResponse.json().catch(() => null)
+  const hasError = pushResult?.data?.some((r: { status?: string }) => r.status === 'error')
+  if (hasError) console.error('Expo push API reported an error:', JSON.stringify(pushResult))
 
   return new Response('ok')
 })
