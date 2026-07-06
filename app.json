@@ -15,6 +15,7 @@
     },
     "android": {
       "package": "com.chatapp.mobile",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#1e2321"
       }
