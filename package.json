@@ -4,9 +4,10 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
+    "android": "expo run:android",
     "web": "expo start --web",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "ios": "expo run:ios"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",
