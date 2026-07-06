@@ -23,7 +23,7 @@ and manually verified against a live Supabase project with two real accounts
 | Typing indicators | ✅ verified |
 | Groups (create, message, member list) | ✅ verified |
 | In-app sound on message receive | ⚠️ wired up, untested (placeholder audio file — see §6) |
-| Android push notifications | ❌ not testable without Firebase/EAS setup (see README §6) |
+| Android push notifications | ✅ verified end-to-end on a real device (webhook → Edge Function → Expo push → device, with vibration) — see §6.14 |
 | Live-updating conversation list (no manual refresh) | ✅ verified |
 | Unread bold text + count badge | ✅ verified |
 | "Unread messages" divider inside a chat | ✅ verified |
@@ -600,6 +600,143 @@ page-load-then-first-visit cycles) after adding the suffix.
 
 ---
 
+### 6.14 — Android push notifications: full setup saga (EAS, Firebase, notification channels)
+
+Push notifications were fully wired up in code (Phase 5) but never actually
+tested end-to-end until this pass, since it requires real accounts and a
+real device — the web preview and Expo Go can't exercise any of this. Four
+separate, unrelated problems had to be fixed before a real notification
+with sound/vibration made it to a physical Android device. In order
+encountered:
+
+**1. `assets/notification-icon.png` (and `assets/icon.png`) were literal
+placeholder text files, not images.** `npx expo prebuild --platform android`
+failed with `Could not find MIME for Buffer <null>` inside
+`expo-notifications`' Android icon-resizing plugin step. Confirmed via
+`Read` on the file, which reported non-image bytes decoding to
+`PLACEHOLDER`. Fixed by generating a real PNG (a plain white circle on a
+transparent background — Android notification icons must be a white
+silhouette; the OS masks out any color) via .NET's `System.Drawing` in
+PowerShell. `icon.png` turned out not to be referenced anywhere in the
+config at all, so it wasn't actually blocking anything — only
+`notification-icon.png` (referenced by the `expo-notifications` plugin) was.
+**Lesson: run `npx expo prebuild --platform android --no-install` locally
+before burning an EAS Build cycle on config problems — it reproduces the
+exact same prebuild step EAS runs remotely, in under a minute instead of
+10+.**
+
+**2. `eas build` requires a git repository; there wasn't one.** This whole
+project had never been put under version control. `eas build` refused to
+proceed non-interactively without one. Fixed with a plain `git init` +
+initial commit — safe since `.gitignore` already correctly excluded
+`node_modules/`, `.env`, `google-services.json`, and key/cert files before
+this commit ever happened.
+
+**3. `google-services.json` is gitignored (correctly — it's a real
+credential), but EAS Build only uploads git-tracked files.** Setting
+`android.googleServicesFile: "./google-services.json"` in a static
+`app.json` produced a build-time warning ("is not checked in to your
+repository and won't be uploaded to the builder") and the file was silently
+missing from every build. Fixed properly, not by tracking the secret in
+git:
+- Converted `app.json` → `app.config.js` (a static JSON file can't read
+  environment variables; a dynamic JS config can).
+- Uploaded the file as an EAS **file environment variable**:
+  `eas env:create --name GOOGLE_SERVICES_JSON --type file --value
+  ./google-services.json --visibility sensitive --environment development`.
+- `app.config.js` now resolves `android.googleServicesFile` as
+  `process.env.GOOGLE_SERVICES_JSON ?? './google-services.json'` — the env
+  var (a filesystem path to the decrypted file, injected by EAS at build
+  time) wins on EAS's servers; the literal relative path is just a fallback
+  for anyone running `expo prebuild` locally with the real file present.
+- A build-time log line still claims the file "is not checked in to your
+  repository" even with this fix in place — that warning is a local static
+  analysis artifact of evaluating the config without the env var set (it
+  doesn't have access to EAS's env vars either), not a sign of actual
+  failure. Verified as harmless by confirming the file genuinely landed in
+  `android/app/google-services.json` after a local
+  `expo prebuild --platform android` with `GOOGLE_SERVICES_JSON` unset
+  (falls back to the local relative path, which is what a developer with
+  the real file in their working tree would hit) and, more importantly, by
+  the actual remote build succeeding.
+
+**4. The FCM V1 service-account key has to be explicitly assigned to the
+"Push Notifications (FCM V1)" role — uploading it isn't enough.**
+`eas credentials` → Android has *three separate* Google Service Account
+"roles" that can each hold their own key: Push Notifications (FCM V1), Play
+Store Submissions, and a plain uploaded key with no role at all. The first
+upload attempt went through the generic "Google Service Account" → "Upload
+a new key" path without assigning it to any specific role, so
+`eas credentials`'s summary screen kept showing
+`Push Notifications (FCM V1): ... None assigned yet` even though a key
+existed. Symptom: `eas credentials` looked fine at a glance (a key was
+listed under plain "Google Service Account"), the app registered a push
+token successfully, our own `notify` Edge Function returned `200 ok` for
+every call — but calling Expo's push API (`https://exp.host/--/api/v2/push/send`)
+directly with the real token returned
+`{"status":"error","message":"Unable to retrieve the FCM server key for the
+recipient's app...","details":{"error":"InvalidCredentials","fault":"developer"}}`.
+**The `notify` function doesn't check Expo's push API response at all — it
+fires the request and returns `'ok'` regardless of what Expo's servers say
+about it.** This means a `200` from our own function proves nothing about
+whether the push actually got delivered; the only way to see this class of
+failure is to call Expo's push endpoint directly and read `data[].status`/
+`data[].message` from the response body. Fixed via `eas credentials` →
+Android → Google Service Account → **"Manage your Google Service Account
+Key for Push Notifications (FCM V1)"** specifically (not the generic
+"Google Service Account" entry point) → selected the already-uploaded key
+rather than re-uploading. Confirmed fixed by re-calling Expo's push API
+directly and seeing `{"status":"ok", "id": "..."}` instead of the
+`InvalidCredentials` error.
+
+**5. No Android notification channel was ever configured, so pushes arrived
+silently — no sound, no vibration.** Since Android 8 (API 26), sound,
+vibration, and importance are entirely controlled by the notification
+*channel* a notification is posted to, not by the `sound` field in the push
+payload. Neither the client nor the push payload referenced any channel, so
+notifications landed in whatever channel Android/FCM auto-created by
+default — which had no vibration and, per the actual device test, no sound
+either (independently of the phone being on silent, which is expected/
+correct — silent mode should mute sound; it's not this bug). Fixed with two
+matching halves:
+- `hooks/usePushToken.ts` now calls
+  `Notifications.setNotificationChannelAsync('messages', { importance:
+  MAX, vibrationPattern: [...], sound: 'default', lightColor: ... })`
+  once, as part of `registerForPushNotifications()`.
+- `supabase/functions/notify/index.ts`'s push payload now includes
+  `channelId: 'messages'` so Android routes the notification through that
+  channel instead of an auto-created one.
+- Deliberately named the channel `messages`, **not** `default`. Android
+  forbids apps from changing a channel's importance after its first
+  creation (by design — otherwise an app could silently re-enable sound a
+  user had turned off), so reusing an id like `default` risks permanently
+  inheriting whatever low-importance channel the OS/FCM auto-created before
+  this code ever ran. A fresh, never-before-used channel id sidesteps that
+  entirely. If sound/vibration ever need to change again, bump the channel
+  id (e.g. `messages-v2`) rather than editing `messages` in place — existing
+  installs won't pick up channel property changes otherwise.
+- This is a **client-side JS change**, not a native one — on the
+  development build (connected to Metro), it took effect after a plain app
+  reload, no new `eas build` required. It would need one on a standalone
+  production build, since there'd be no Metro to hot-reload from.
+
+**How this was actually verified**, since none of it is testable in this
+project's usual browser-preview loop: inserted rows directly into
+`public.messages` via `supabase db query --linked` (the Database Webhook
+trigger fires on any INSERT regardless of source, so this exercises the
+exact same path a real client-sent message would) and confirmed a real
+notification — title, body, and vibration — arrived on a physical Android
+device with the app backgrounded, both via a direct Expo push API call
+(isolating the channel fix from the rest of the pipeline) and via a genuine
+end-to-end insert through the real webhook → Edge Function → Expo → device
+chain.
+
+**Status: verified working end-to-end on Android.** iOS was out of scope
+for this pass (see the account/cost tradeoffs discussed with the user —
+Apple Developer Program is a paid, separate setup not pursued here).
+
+---
+
 ## 7. Known gaps / next things to look at
 
 - **Realtime Authorization for typing/presence** — attempted and abandoned;
@@ -625,10 +762,19 @@ page-load-then-first-visit cycles) after adding the suffix.
   defensively (wraps both `createAsync` and `replayAsync` in try/catch) so a
   bad file fails silently rather than crashing, but nobody has actually heard
   it play. Swap in a real short audio file and confirm.
-- **Push notifications (Phase 5 Part B)** — fully coded but zero-tested; needs
-  a Firebase project, `google-services.json`, an EAS dev build, and a real
-  Android device before any of it can be verified. See README §6 for the
-  full checklist.
+- **Push notifications (Phase 5 Part B)** — verified working end-to-end on
+  Android; see §6.14 for the full setup saga (five separate fixes were
+  needed: placeholder icon files, missing git repo, gitignored
+  `google-services.json` not reaching EAS Build, an FCM V1 key uploaded but
+  never assigned to the push-notification role, and a missing Android
+  notification channel for sound/vibration). iOS was not attempted — it
+  needs a paid Apple Developer Program enrollment, which wasn't pursued in
+  this pass. The `notify` Edge Function still doesn't check Expo's push API
+  response (`data[].status`/`message`) — it returns `200 ok` regardless of
+  whether Expo/FCM actually accepted the notification, which is exactly
+  what made the FCM-credential bug in §6.14 hard to see at first. Worth
+  adding real error handling there before relying on this in anything more
+  than a side project.
 - **Conversation list refetch-on-every-message** — see §4's last paragraph.
   Fine now, first thing to optimize if this ever needs to scale.
 - **Group leave/remove-member/rename** — out of scope per
