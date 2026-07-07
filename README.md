@@ -44,6 +44,22 @@ retiring those). Copy the **Publishable key** (`sb_publishable_...`). It's
 public by design (ships inside the client bundle) — RLS is the actual
 security boundary, not keeping this key secret.
 
+**This local `.env` is enough for `npx expo start` and for any `development`
+profile build** (its `developmentClient: true` means the installed app loads
+JS live from your Metro server, which reads this file). **It is NOT enough
+for a `preview` or `production` build** — those bundle the JS on EAS's own
+servers, which never see your gitignored `.env`. Register both values as EAS
+environment variables too, for every profile you'll actually build with:
+```bash
+npx eas-cli@latest env:create --name EXPO_PUBLIC_SUPABASE_URL --value <your-url> \
+  --visibility plaintext --environment preview --scope project
+npx eas-cli@latest env:create --name EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY --value <your-key> \
+  --visibility plaintext --environment preview --scope project
+```
+(repeat with `--environment production` too if you'll ever build that
+profile). Skipping this produces an app that crashes instantly on launch,
+before any screen renders — see `documentation.md` §6.16 for the full story.
+
 ## 4. Run the app
 
 ```bash

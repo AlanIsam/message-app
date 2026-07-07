@@ -849,6 +849,56 @@ assuming the code regressed.
 
 ---
 
+### 6.16 — First non-dev-client build (`preview` profile) crashed instantly: Supabase env vars never registered with EAS
+
+The first `eas build --profile preview` crashed the app immediately on launch
+on a real device, with no UI ever rendering. Root cause:
+`EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` only
+ever existed in the local, gitignored `.env` file — never as EAS environment
+variables (`eas env:create`), unlike `GOOGLE_SERVICES_JSON` which had already
+been through that setup (§6.14 #3).
+
+**Why every earlier build masked this:** every build tested up to this point
+used the `development` profile, which sets `developmentClient: true`. An APK
+built with that flag is a thin shell (like Expo Go) that loads its JavaScript
+live from a running `npx expo start` Metro session on a developer's machine,
+rather than bundling the JS at build time. `expo start` loads `.env` locally
+(confirmed in its own log output: `env: load .env` / `env: export
+EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`), so the app
+worked fine every time — but only because it was always connected to a
+Metro server that had the real values, never because the *build itself*
+had them.
+
+`preview` (and `production`) have no dev client — EAS bundles the JS
+remotely, at build time, on servers that never receive the gitignored
+`.env` file (same "EAS Build only uploads git-tracked files" rule as
+`google-services.json`). With no EAS environment variable configured either,
+`process.env.EXPO_PUBLIC_SUPABASE_URL` resolved to `undefined` in the
+embedded bundle. `lib/supabase.ts` calls `createClient(supabaseUrl,
+supabasePublishableKey, ...)` at module load (top-level, not inside a
+function), and `@supabase/supabase-js` throws synchronously
+(`"supabaseUrl is required."`) when the url is falsy — crashing the entire
+app before any screen renders, with no error boundary able to catch it since
+it happens during the very first module evaluation.
+
+**Fixed** by registering both values as EAS environment variables, plain
+text visibility (both are meant to be public — see `lib/supabase.ts`'s own
+comment on why the publishable key is safe client-side), across **all
+three** profiles so this can't resurface on a future `production` build
+either:
+```bash
+eas env:create --name EXPO_PUBLIC_SUPABASE_URL --value <url> \
+  --visibility plaintext --environment <development|preview|production> --scope project
+eas env:create --name EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY --value <key> \
+  --visibility plaintext --environment <development|preview|production> --scope project
+```
+**Lesson: any `EXPO_PUBLIC_*` variable your app reads via `process.env` needs
+an EAS environment variable in every profile you'll ever build without
+`developmentClient: true` — a working `development` build proves nothing
+about whether a `preview`/`production` build will even start.**
+
+---
+
 ## 7. Known gaps / next things to look at
 
 - **Realtime Authorization for typing/presence** — attempted and abandoned;
