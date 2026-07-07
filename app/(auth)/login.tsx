@@ -39,7 +39,8 @@ export default function LoginScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <Text style={styles.title}>Welcome back</Text>
+      <Text style={styles.title}>Welcome to Randau</Text>
+      <Text style={styles.subtitle}>Real conversations, right when they happen.</Text>
 
       <TextInput
         style={styles.input}
@@ -91,8 +92,14 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 28,
     fontWeight: '700',
-    marginBottom: 32,
     textAlign: 'center',
+  },
+  subtitle: {
+    color: colors.textMuted,
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 32,
   },
   input: {
     backgroundColor: colors.surface,

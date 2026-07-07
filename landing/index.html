@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Randau — Real conversations, right when they happen.</title>
+<meta name="description" content="Randau is a fast, realtime chat app with groups, presence, typing indicators, and push notifications." />
+<style>
+  :root {
+    --deepest: #16191a;
+    --background: #1e2321;
+    --surface: #2a302d;
+    --accent: #16a34a;
+    --accent-bright: #22c55e;
+    --text: #e6e9e7;
+    --text-muted: #8a938e;
+    --border: #333b37;
+    --white: #ffffff;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+  }
+
+  a { color: inherit; }
+
+  .nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 20px 24px;
+  }
+
+  .nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 18px;
+  }
+
+  .nav-brand img {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
+
+  .nav a.cta-small {
+    background: var(--accent);
+    color: var(--white);
+    padding: 8px 18px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  .hero {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 56px 24px 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 64px;
+    flex-wrap: wrap;
+  }
+
+  .hero-copy {
+    max-width: 460px;
+    text-align: center;
+  }
+
+  .hero-copy img {
+    width: 72px;
+    height: 72px;
+    border-radius: 18px;
+    margin-bottom: 24px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  }
+
+  .hero h1 {
+    font-size: 40px;
+    font-weight: 800;
+    margin: 0 0 16px;
+    letter-spacing: -0.02em;
+  }
+
+  .hero p.tagline {
+    font-size: 18px;
+    color: var(--text-muted);
+    margin: 0 0 32px;
+  }
+
+  .cta-row {
+    display: flex;
+    gap: 14px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  /* Phone mockup — recreates the real login screen in CSS rather than
+     embedding a raster screenshot, so it stays crisp at any size and needs
+     no extra image asset beyond the app icon. Swap in a real photo/screenshot
+     later if you'd rather — just replace this whole .phone block with an
+     <img>. */
+  .phone {
+    width: 280px;
+    height: 580px;
+    background: var(--deepest);
+    border: 10px solid #0d0f0f;
+    border-radius: 44px;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
+    padding: 28px 22px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .phone-notch {
+    width: 90px;
+    height: 18px;
+    background: #0d0f0f;
+    border-radius: 10px;
+    margin-bottom: 28px;
+  }
+
+  .phone img.phone-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    margin-bottom: 18px;
+  }
+
+  .phone h2 {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0 0 6px;
+    text-align: center;
+  }
+
+  .phone p.phone-tagline {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+    margin: 0 0 24px;
+  }
+
+  .phone-input {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+
+  .phone-button {
+    width: 100%;
+    background: var(--accent);
+    border-radius: 10px;
+    padding: 13px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--white);
+    margin-top: 6px;
+  }
+
+  .phone-link {
+    font-size: 12px;
+    color: var(--accent-bright);
+    margin-top: 18px;
+  }
+
+  .cta-primary,
+  .cta-secondary {
+    display: inline-block;
+    padding: 14px 28px;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 15px;
+    text-decoration: none;
+  }
+
+  .cta-primary {
+    background: var(--accent);
+    color: var(--white);
+  }
+
+  .cta-primary:hover { background: var(--accent-bright); }
+
+  .cta-secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  .note {
+    margin-top: 14px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .features {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 20px;
+  }
+
+  .feature-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+  }
+
+  .feature-card .icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--accent-bright);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    margin-bottom: 14px;
+  }
+
+  .feature-card h3 {
+    margin: 0 0 8px;
+    font-size: 16px;
+  }
+
+  .feature-card p {
+    margin: 0;
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 28px 24px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+  <nav class="nav">
+    <div class="nav-brand">
+      <img src="assets/icon.png" alt="Randau icon" />
+      Randau
+    </div>
+    <a class="cta-small" href="#download">Get the app</a>
+  </nav>
+
+  <section class="hero">
+    <div class="hero-copy">
+      <img src="assets/icon.png" alt="Randau app icon" />
+      <h1>Welcome to Randau</h1>
+      <p class="tagline">Real conversations, right when they happen.</p>
+      <div class="cta-row" id="download">
+        <!-- Points at the v0.0.1-beta GitHub Release asset - doesn't expire,
+             unlike an EAS build artifact URL. When you ship a new version:
+             create a new release with the new .apk attached, and bump this
+             href to match the new tag. -->
+        <a class="cta-primary" href="https://github.com/AlanIsam/message-app/releases/download/v0.0.1-beta/randau.v0.0.1-beta.apk" download="Randau.apk">Download for Android</a>
+        <a class="cta-secondary" href="#features">See what it does</a>
+      </div>
+      <p class="note">Free. No ads. Your messages stay yours.</p>
+    </div>
+
+    <div class="phone" aria-hidden="true">
+      <div class="phone-notch"></div>
+      <img class="phone-icon" src="assets/icon.png" alt="" />
+      <h2>Welcome to Randau</h2>
+      <p class="phone-tagline">Real conversations, right when they happen.</p>
+      <div class="phone-input">Email</div>
+      <div class="phone-input">Password</div>
+      <div class="phone-button">Log In</div>
+      <div class="phone-link">Don't have an account? Register</div>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <div class="feature-card">
+      <div class="icon">&#9993;</div>
+      <h3>Realtime messaging</h3>
+      <p>Messages arrive instantly — no refreshing, no waiting.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">&#128101;</div>
+      <h3>Groups &amp; DMs</h3>
+      <p>Start a one-on-one chat or spin up a group in seconds.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">&#128312;</div>
+      <h3>Online status &amp; typing</h3>
+      <p>See who's around and know when they're replying.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">&#128276;</div>
+      <h3>Push notifications</h3>
+      <p>Never miss a message, even when the app is closed.</p>
+    </div>
+  </section>
+
+  <footer>
+    &copy; 2026 Randau. Built with Expo &amp; Supabase.
+  </footer>
+
+</body>
+</html>
